@@ -1,0 +1,12 @@
+{
+    "id": "{1DE78FF2-4676-4309-B27D-13D8D92E482E}",
+    "name": "SpotifyKachel",
+    "author": "bgersmann",
+    "url": "https://github.com/bgersmann/SpotifyKachel",
+    "compatibility": {
+        "version": "9.1"
+    },
+    "version": "1.0",
+    "build": 0,
+    "date": 0
+}

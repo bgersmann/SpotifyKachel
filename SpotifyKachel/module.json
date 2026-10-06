@@ -1,0 +1,12 @@
+{
+    "id": "{05AED0B1-1B95-487B-8441-7A3439A43EDF}",
+    "name": "SpotifyKachel",
+    "type": 3,
+    "vendor": "Spotify",
+    "aliases": ["Spotify Kachel", "Spotify Browser"],
+    "url": "https://github.com/bgersmann/SpotifyKachel",
+    "parentRequirements": [],
+    "childRequirements": [],
+    "implemented": [],
+    "prefix": "SPK"
+}

@@ -1,0 +1,81 @@
+{
+    "elements": [
+        {
+            "type": "Label",
+            "caption": "Kachel mit Suche, empfohlenen Sendern und zuletzt gespielten Playlists. Nutzt die Verbindung einer bestehenden Spotify-Instanz."
+        },
+        {
+            "type": "SelectInstance",
+            "name": "SpotifyInstance",
+            "caption": "Spotify-Instanz",
+            "validModules": ["{DCC40FC6-4447-AA1A-E3E5-B5F32DF81806}"]
+        },
+        {
+            "type": "NumberSpinner",
+            "name": "RefreshInterval",
+            "caption": "Listen aktualisieren alle",
+            "suffix": "Minuten",
+            "minimum": 0,
+            "maximum": 1440
+        },
+        {
+            "type": "NumberSpinner",
+            "name": "MaxRecent",
+            "caption": "Anzahl zuletzt gespielt",
+            "minimum": 1,
+            "maximum": 30
+        },
+        {
+            "type": "NumberSpinner",
+            "name": "MaxRecommended",
+            "caption": "Anzahl empfohlene Sender",
+            "minimum": 1,
+            "maximum": 30
+        },
+        {
+            "type": "CheckBox",
+            "name": "IncludeAlbums",
+            "caption": "Bei \"Zuletzt gespielt\" auch Alben und Künstler anzeigen"
+        },
+        {
+            "type": "List",
+            "name": "CustomStations",
+            "caption": "Eigene Sender (werden zuerst angezeigt)",
+            "add": true,
+            "delete": true,
+            "changeOrder": true,
+            "rowCount": 5,
+            "columns": [
+                {
+                    "caption": "Name (optional)",
+                    "name": "Name",
+                    "width": "250px",
+                    "add": "",
+                    "edit": { "type": "ValidationTextBox" }
+                },
+                {
+                    "caption": "Spotify-URI oder Link (z. B. spotify:playlist:… oder https://open.spotify.com/playlist/…)",
+                    "name": "URI",
+                    "width": "auto",
+                    "add": "",
+                    "edit": { "type": "ValidationTextBox" }
+                }
+            ]
+        }
+    ],
+    "actions": [
+        {
+            "type": "Button",
+            "caption": "Listen jetzt aktualisieren",
+            "onClick": "SPK_Refresh($id);"
+        },
+        {
+            "type": "Button",
+            "caption": "Verlauf und Cache leeren",
+            "onClick": "SPK_ClearCache($id);"
+        }
+    ],
+    "status": [
+        { "code": 104, "icon": "inactive", "caption": "Bitte eine Spotify-Instanz auswählen" }
+    ]
+}
