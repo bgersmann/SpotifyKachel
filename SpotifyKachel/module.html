@@ -1,4 +1,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+    // Die Kachel-Visu übergibt die Abstände (Titelleiste oben, Rand seitlich/unten) als URL-Parameter.
+    // html-sdk.js setzt sie als body-Margin; wir übernehmen sie als Innenabstand, damit die Höhe passt.
+    (function () {
+        var q = new URLSearchParams(window.location.search), root = document.documentElement.style;
+        [['margintop', '--mt'], ['marginside', '--ms'], ['marginbottom', '--mb']].forEach(function (p) {
+            var v = parseFloat(q.get(p[0]));
+            if (!isNaN(v)) root.setProperty(p[1], v + 'px');
+        });
+    })();
+</script>
 <style>
     :root {
         --accent: #1DB954;
@@ -6,15 +17,19 @@
         --surface-strong: color-mix(in srgb, currentColor 13%, transparent);
         --muted: color-mix(in srgb, currentColor 60%, transparent);
         --radius: 10px;
+        --mt: 10px;
+        --ms: 10px;
+        --mb: 10px;
     }
     * { box-sizing: border-box; }
-    html, body { height: 100%; margin: 0; }
+    html, body { height: 100%; }
+    body { margin: 0 !important; }
     body { font-family: inherit; overflow: hidden; -webkit-tap-highlight-color: transparent; }
     button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
     svg.i { width: 20px; height: 20px; fill: currentColor; flex: none; }
     [hidden] { display: none !important; }
 
-    #app { height: 100%; display: flex; flex-direction: column; gap: 10px; padding: 10px; }
+    #app { height: 100%; display: flex; flex-direction: column; gap: 10px; padding: var(--mt) var(--ms) var(--mb); }
 
     /* Suche */
     .search { display: flex; align-items: center; gap: 8px; background: var(--surface); border-radius: 999px; padding: 0 12px; height: 40px; flex: none; }
@@ -88,7 +103,7 @@
 
     /* Großes Format / Vollbild: Raster statt Karussell */
     @media (min-width: 560px) and (min-height: 420px) {
-        #app { padding: 16px; gap: 14px; }
+        #app { gap: 14px; }
         .search { height: 46px; max-width: 560px; }
         h2 { font-size: 18px; margin-top: 10px; }
         .cards.grid { grid-auto-flow: row; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); grid-auto-columns: unset; overflow: visible; }
@@ -100,7 +115,7 @@
     }
     /* Sehr flache Kachel: nur Karussells, Player kompakter */
     @media (max-height: 300px) {
-        #app { gap: 6px; padding: 8px; }
+        #app { gap: 6px; }
         .search { height: 34px; }
         h2 { font-size: 13px; margin: 2px 2px 4px; }
         .cards { grid-auto-columns: 84px; }
