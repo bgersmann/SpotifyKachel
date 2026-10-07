@@ -71,6 +71,9 @@ class SpotifyKachel extends IPSModuleStrict
 
     public function RequestAction(string $Ident, mixed $Value): void
     {
+        if ($Ident !== 'NowPlaying') {
+            $this->SendDebug('RequestAction', $Ident . ' = ' . json_encode($Value), 0);
+        }
         switch ($Ident) {
             case 'Init':
                 // Veraltete Listen im Hintergrund nachladen, damit die Kachel sofort erscheint
@@ -109,6 +112,10 @@ class SpotifyKachel extends IPSModuleStrict
 
             case 'SetDevice':
                 $this->SetDevice((string) $Value);
+                break;
+
+            case 'Volume':
+                $this->SetVolume((int) $Value);
                 break;
 
             case 'Refresh':
@@ -492,7 +499,9 @@ class SpotifyKachel extends IPSModuleStrict
                 'playing'    => (bool) ($player['is_playing'] ?? false),
                 'progress'   => (int) ($player['progress_ms'] ?? 0),
                 'duration'   => (int) ($item['duration_ms'] ?? 0),
-                'device'     => (string) ($player['device']['name'] ?? '')
+                'device'     => (string) ($player['device']['name'] ?? ''),
+                'volume'     => isset($player['device']['volume_percent']) ? (int) $player['device']['volume_percent'] : null,
+                'canVolume'  => (bool) ($player['device']['supports_volume'] ?? true)
             ]
         ]);
     }
@@ -514,21 +523,50 @@ class SpotifyKachel extends IPSModuleStrict
 
     private function SetDevice(string $deviceID): void
     {
-        if (!preg_match('/^[A-Za-z0-9]+$/', $deviceID) || !$this->SpotifyAvailable()) {
+        // Geräte-IDs sind je nach Gerät Hex-Strings oder UUIDs (mit Bindestrichen)
+        if (!preg_match('/^[A-Za-z0-9_.:-]{1,128}$/', $deviceID) || !$this->SpotifyAvailable()) {
+            $this->SendDebug('SetDevice', 'Ungültige Geräte-ID: ' . $deviceID, 0);
             return;
         }
-        $spotifyID = $this->ReadPropertyInteger('SpotifyInstance');
-        $variableID = @IPS_GetObjectIDByIdent('Device', $spotifyID);
-        if ($variableID === false) {
-            return;
+
+        // Gerät in der Spotify-Instanz setzen, damit SPO_PlayURI künftig dieses Gerät nutzt
+        $variableID = @IPS_GetObjectIDByIdent('Device', $this->ReadPropertyInteger('SpotifyInstance'));
+        if ($variableID !== false) {
+            $error = '';
+            $this->CallSpotify(fn (int $id) => RequestAction($variableID, $deviceID), $error);
         }
-        $error = '';
-        $this->CallSpotify(fn (int $id) => RequestAction($variableID, $deviceID), $error);
-        if ($error !== '') {
-            $this->Push(['type' => 'error', 'text' => 'Gerät konnte nicht gewechselt werden.']);
+
+        // Wiedergabe übertragen, falls die Spotify-Instanz das nicht schon getan hat
+        $player = $this->Api('GET', '/me/player');
+        if (($player['device']['id'] ?? '') !== $deviceID) {
+            $result = $this->Api('PUT', '/me/player', json_encode([
+                'device_ids' => [$deviceID],
+                'play'       => (bool) ($player['is_playing'] ?? false)
+            ]));
+            if ($result === null) {
+                $this->Push(['type' => 'error', 'text' => 'Gerät konnte nicht gewechselt werden.']);
+            }
         }
-        IPS_Sleep(600);
+        IPS_Sleep(800);
         $this->PushNowPlaying();
+    }
+
+    private function SetVolume(int $volume): void
+    {
+        if (!$this->SpotifyAvailable()) {
+            return;
+        }
+        $volume = max(0, min(100, $volume));
+        if ($this->Api('PUT', '/me/player/volume?volume_percent=' . $volume) === null) {
+            $this->Push(['type' => 'error', 'text' => 'Die Lautstärke kann auf diesem Gerät nicht geändert werden.']);
+            $this->PushNowPlaying();
+            return;
+        }
+        // Lautstärke-Variable der Spotify-Instanz mitziehen
+        $variableID = @IPS_GetObjectIDByIdent('Volume', $this->ReadPropertyInteger('SpotifyInstance'));
+        if ($variableID !== false) {
+            SetValue($variableID, $volume);
+        }
     }
 
     // ---------------------------------------------------------------------

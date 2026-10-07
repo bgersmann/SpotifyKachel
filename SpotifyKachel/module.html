@@ -86,6 +86,13 @@
     .ctrl .main { background: currentColor; }
     .ctrl .main svg { fill: var(--invert, #000); }
     .ctrl .main:hover { background: currentColor; transform: scale(1.05); }
+    .vol { display: none; align-items: center; gap: 6px; margin: 0 6px; flex: none; }
+    .vol input, .volrow input { accent-color: var(--accent); cursor: pointer; }
+    .vol input { width: 110px; }
+    .vol.off, .volrow.off { opacity: .4; pointer-events: none; }
+    .volrow { display: flex; align-items: center; gap: 10px; padding: 6px 10px 12px; }
+    .volrow input { flex: 1; }
+    .volrow span { min-width: 3ch; text-align: right; font-size: 13px; }
     #progress { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent); width: 0; transition: width 1s linear; }
     #deviceName { color: var(--accent); }
 
@@ -111,6 +118,7 @@
         #player { padding: 10px 14px; }
         #player .cover { width: 56px; height: 56px; }
         .ctrl button { width: 42px; height: 42px; }
+        .vol { display: flex; }
         section + section { margin-top: 22px; }
     }
     /* Sehr flache Kachel: nur Karussells, Player kompakter */
@@ -160,6 +168,7 @@
             <button data-cmd="previous" aria-label="Zurück"><svg class="i"><use href="#i-prev"/></svg></button>
             <button data-cmd="toggle" class="main" aria-label="Wiedergabe"><svg class="i" id="playIcon"><use href="#i-play"/></svg></button>
             <button data-cmd="next" aria-label="Weiter"><svg class="i"><use href="#i-next"/></svg></button>
+            <div class="vol" id="volBox"><svg class="i"><use href="#i-volume"/></svg><input type="range" id="vol" min="0" max="100" step="1" aria-label="Lautstärke"></div>
             <button id="deviceBtn2" aria-label="Gerät"><svg class="i"><use href="#i-speaker"/></svg></button>
         </div>
         <div id="progress"></div>
@@ -177,6 +186,7 @@
     <symbol id="i-next" viewBox="0 0 24 24"><path d="M5 5.5v13a1 1 0 0 0 1.55.83L16 13v6h2V5h-2v6L6.55 4.67A1 1 0 0 0 5 5.5Z"/></symbol>
     <symbol id="i-prev" viewBox="0 0 24 24"><path d="M19 5.5v13a1 1 0 0 1-1.55.83L8 13v6H6V5h2v6l9.45-6.33A1 1 0 0 1 19 5.5Z"/></symbol>
     <symbol id="i-speaker" viewBox="0 0 24 24"><path d="M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm0 2v16h10V4Zm5 7a3 3 0 1 1 0 6 3 3 0 0 1 0-6Zm0 2a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm0-7a1.25 1.25 0 1 1 0 2.5A1.25 1.25 0 0 1 12 6Z"/></symbol>
+    <symbol id="i-volume" viewBox="0 0 24 24"><path d="M3 9h4l5-4v14l-5-4H3Zm13.5 3a4.5 4.5 0 0 0-2.5-4.03v8.05A4.5 4.5 0 0 0 16.5 12ZM14 3.23v2.06a7 7 0 0 1 0 13.42v2.06a9 9 0 0 0 0-17.54Z"/></symbol>
     <symbol id="i-note" viewBox="0 0 24 24"><path d="M9 18a3 3 0 1 1-2-2.83V4l12-2v13a3 3 0 1 1-2-2.83V6.4l-8 1.33Z"/></symbol>
     <symbol id="i-radio" viewBox="0 0 24 24"><path d="M12 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm-4.24-2.24 1.41 1.41a4 4 0 0 0 0 5.66l-1.41 1.41a6 6 0 0 1 0-8.48Zm8.48 0a6 6 0 0 1 0 8.48l-1.41-1.41a4 4 0 0 0 0-5.66ZM4.93 4.93l1.41 1.41a8 8 0 0 0 0 11.32l-1.41 1.41a10 10 0 0 1 0-14.14Zm14.14 0a10 10 0 0 1 0 14.14l-1.41-1.41a8 8 0 0 0 0-11.32Z"/></symbol>
     <symbol id="i-spin" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9h-2a7 7 0 1 1-7-7Z"/></symbol>
@@ -189,6 +199,7 @@
     var nowPlaying = null, npTimestamp = 0;
     var search = { query: '', results: null, filter: 'all', pending: false };
     var busyUri = null, debounce = null, toastTimer = null;
+    var volHoldUntil = 0, volTimer = null;
 
     var $ = function (id) { return document.getElementById(id); };
 
@@ -333,7 +344,34 @@
         dev.onclick = openDevices;
         sub.appendChild(dev);
         $('playIcon').firstChild.setAttribute('href', np && np.playing ? '#i-pause' : '#i-play');
+        updateVolume();
         updateProgress();
+    }
+
+    function volumeSliders() {
+        return [$('vol'), $('volSheet')].filter(function (x) { return !!x; });
+    }
+
+    function updateVolume() {
+        var np = nowPlaying, can = !!np && np.volume !== null && np.volume !== undefined && np.canVolume !== false;
+        $('volBox').classList.toggle('off', !can);
+        var row = $('volRow');
+        if (row) row.classList.toggle('off', !can);
+        if (!can || Date.now() < volHoldUntil) return;
+        volumeSliders().forEach(function (s) { s.value = np.volume; });
+        if ($('volValue')) $('volValue').textContent = np.volume;
+    }
+
+    function bindVolume(slider) {
+        slider.addEventListener('input', function () {
+            var v = parseInt(slider.value, 10);
+            volHoldUntil = Date.now() + 3000; // eigene Eingabe nicht durch Status-Updates überschreiben
+            volumeSliders().forEach(function (s) { if (s !== slider) s.value = v; });
+            if ($('volValue')) $('volValue').textContent = v;
+            if (nowPlaying) nowPlaying.volume = v;
+            clearTimeout(volTimer);
+            volTimer = setTimeout(function () { requestAction('Volume', v); }, 250);
+        });
     }
 
     function updateProgress() {
@@ -387,6 +425,20 @@
     function renderDevices(devices) {
         var list = $('deviceList');
         list.textContent = '';
+        var row = el('div', 'volrow');
+        row.id = 'volRow';
+        row.appendChild(icon('i-volume'));
+        var slider = el('input');
+        slider.type = 'range'; slider.min = 0; slider.max = 100; slider.step = 1; slider.id = 'volSheet';
+        slider.setAttribute('aria-label', 'Lautstärke');
+        bindVolume(slider);
+        row.appendChild(slider);
+        var val = el('span', '', '');
+        val.id = 'volValue';
+        row.appendChild(val);
+        list.appendChild(el('h2', '', 'Lautstärke'));
+        list.appendChild(row);
+        updateVolume();
         list.appendChild(el('h2', '', 'Wiedergabe auf'));
         if (!devices.length) {
             list.appendChild(el('div', 'empty', 'Kein Gerät gefunden. Spotify auf einem Gerät öffnen und erneut versuchen.'));
@@ -465,6 +517,7 @@
         };
     });
     $('deviceBtn2').onclick = openDevices;
+    bindVolume($('vol'));
     $('devices').onclick = function (e) { if (e.target === this) this.hidden = true; };
 
     // Farbe für den Play-Button und das Geräte-Menü an das Theme anpassen
