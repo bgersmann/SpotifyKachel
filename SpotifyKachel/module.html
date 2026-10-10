@@ -94,7 +94,19 @@
     .volrow input { flex: 1; }
     .volrow span { min-width: 3ch; text-align: right; font-size: 13px; }
     #progress { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent); width: 0; transition: width 1s linear; }
-    #deviceName { color: var(--accent); }
+    .ctrl .devbtn { width: auto; max-width: 170px; height: 32px; padding: 0 12px 0 10px; margin-left: 4px; border-radius: 999px; display: flex; align-items: center; gap: 6px; background: var(--surface); }
+    .ctrl .devbtn:hover { background: var(--surface-strong); }
+    .ctrl .devbtn.on { color: var(--accent); }
+    .ctrl .devbtn svg { width: 18px; height: 18px; }
+    .devbtn span { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    @media (max-width: 440px) {
+        .ctrl .devbtn { max-width: 92px; padding: 0 8px 0 6px; gap: 4px; margin-left: 2px; }
+        .devbtn span { font-size: 11px; }
+    }
+    @media (max-width: 330px) {
+        .ctrl .devbtn { max-width: 34px; padding: 0 8px; }
+        .devbtn span { display: none; }
+    }
 
     /* Geräte-Auswahl */
     #devices { position: absolute; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: flex-end; justify-content: center; padding: 10px; z-index: 5; }
@@ -162,14 +174,14 @@
         <div class="cover" id="npCover"><svg class="i ph"><use href="#i-note"/></svg></div>
         <div class="meta">
             <div class="title" id="npTitle">Nichts wird abgespielt</div>
-            <div class="sub" id="npSub"><button id="deviceBtn"><span id="deviceName">Gerät wählen</span></button></div>
+            <div class="sub" id="npSub"></div>
         </div>
         <div class="ctrl">
             <button data-cmd="previous" aria-label="Zurück"><svg class="i"><use href="#i-prev"/></svg></button>
             <button data-cmd="toggle" class="main" aria-label="Wiedergabe"><svg class="i" id="playIcon"><use href="#i-play"/></svg></button>
             <button data-cmd="next" aria-label="Weiter"><svg class="i"><use href="#i-next"/></svg></button>
             <div class="vol" id="volBox"><svg class="i"><use href="#i-volume"/></svg><input type="range" id="vol" min="0" max="100" step="1" aria-label="Lautstärke"></div>
-            <button id="deviceBtn2" aria-label="Gerät"><svg class="i"><use href="#i-speaker"/></svg></button>
+            <button id="deviceBtn2" class="devbtn" aria-label="Gerät wählen"><svg class="i"><use href="#i-speaker"/></svg><span id="devLabel">Gerät wählen</span></button>
         </div>
         <div id="progress"></div>
     </div>
@@ -330,19 +342,24 @@
         if (!total) body.appendChild(el('div', 'empty', 'Keine Treffer für „' + search.query + '“.'));
     }
 
+    var shownCover = null;
+
     function renderPlayer() {
         var np = nowPlaying;
-        var c = $('npCover');
-        c.replaceWith((function () { var n = cover(np); n.id = 'npCover'; return n; })());
+        var image = np && np.image ? np.image : '';
+        if (image !== shownCover) {
+            // Cover nur bei Wechsel neu setzen, sonst flackert es bei jedem Status-Update
+            shownCover = image;
+            $('npCover').replaceWith((function () { var n = cover(np); n.id = 'npCover'; return n; })());
+        }
         $('npTitle').textContent = np ? np.name : 'Nichts wird abgespielt';
-        var sub = $('npSub');
-        sub.textContent = '';
-        if (np && np.sub) sub.appendChild(document.createTextNode(np.sub + ' · '));
-        var dev = el('button');
-        dev.appendChild(el('span', '', np && np.device ? np.device : 'Gerät wählen'));
-        dev.firstChild.id = 'deviceName';
-        dev.onclick = openDevices;
-        sub.appendChild(dev);
+        $('npSub').textContent = np && np.sub ? np.sub : '';
+
+        var device = np && np.device ? np.device : '';
+        var btn = $('deviceBtn2');
+        $('devLabel').textContent = device || 'Gerät wählen';
+        btn.classList.toggle('on', !!device);
+        btn.title = device ? 'Verbunden mit ' + device + ' – Gerät wechseln' : 'Gerät wählen';
         $('playIcon').firstChild.setAttribute('href', np && np.playing ? '#i-pause' : '#i-play');
         updateVolume();
         updateProgress();

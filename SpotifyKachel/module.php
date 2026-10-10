@@ -9,6 +9,9 @@ class SpotifyKachel extends IPSModuleStrict
     private const SEARCH_LIMIT = 10; // Spotify erlaubt für Apps im Development Mode max. 10
     private const META_CACHE_SIZE = 200;
     private const HISTORY_SIZE = 50;
+    private const ACTION_PLAY = 2;
+    // Variablen der Spotify-Instanz, deren Änderung die Kachel sofort aktualisiert
+    private const WATCHED_IDENTS = ['CurrentTrack', 'CurrentArtist', 'CurrentDuration', 'Action', 'Volume', 'Device'];
 
     public function Create(): void
     {
@@ -28,6 +31,8 @@ class SpotifyKachel extends IPSModuleStrict
         $this->RegisterAttributeInteger('LastRefresh', 0);
 
         $this->RegisterTimer('Refresh', 0, 'SPK_Refresh($_IPS[\'TARGET\']);');
+        $this->RegisterTimer('VariableSync', 0, 'SPK_SyncFromVariables($_IPS[\'TARGET\']);');
+        $this->RegisterTimer('ApiSync', 0, 'SPK_SyncFromApi($_IPS[\'TARGET\']);');
 
         // Darstellung als normale Kachel und im Vollbild
         $this->SetVisualizationType(INSTANCE_VISUALIZATION_TYPE_HTML_FULLSCREEN);
@@ -42,6 +47,11 @@ class SpotifyKachel extends IPSModuleStrict
         foreach ($this->GetReferenceList() as $reference) {
             $this->UnregisterReference($reference);
         }
+        foreach ($this->GetMessageList() as $senderID => $messages) {
+            foreach ($messages as $message) {
+                $this->UnregisterMessage($senderID, $message);
+            }
+        }
 
         $spotifyID = $this->ReadPropertyInteger('SpotifyInstance');
         if (!$this->SpotifyAvailable()) {
@@ -50,6 +60,12 @@ class SpotifyKachel extends IPSModuleStrict
             return;
         }
         $this->RegisterReference($spotifyID);
+        foreach (self::WATCHED_IDENTS as $ident) {
+            $variableID = @IPS_GetObjectIDByIdent($ident, $spotifyID);
+            if ($variableID !== false) {
+                $this->RegisterMessage($variableID, VM_UPDATE);
+            }
+        }
         $this->SetStatus(IS_ACTIVE);
 
         // Listen kurz nach dem Übernehmen neu aufbauen (Einstellungen könnten sich geändert haben)
@@ -67,6 +83,73 @@ class SpotifyKachel extends IPSModuleStrict
 
         $html = file_get_contents(__DIR__ . '/module.html');
         return str_replace('/*INITIAL_STATE*/null', $json, $html);
+    }
+
+    public function MessageSink(int $TimeStamp, int $SenderID, int $Message, array $Data): void
+    {
+        // $Data[1]: Wert hat sich geändert
+        if ($Message !== VM_UPDATE || !($Data[1] ?? false)) {
+            return;
+        }
+        if (IPS_GetObject($SenderID)['ObjectIdent'] === 'Device') {
+            // Gerätename und Lautstärke kommen nur aus der API
+            $this->SetTimerInterval('ApiSync', 300);
+            return;
+        }
+        // Mehrere Variablen ändern sich meist kurz hintereinander – gesammelt übertragen
+        $this->SetTimerInterval('VariableSync', 150);
+    }
+
+    /**
+     * Aktuelle Wiedergabe aus den Variablen der Spotify-Instanz übernehmen (ohne API-Aufruf).
+     */
+    public function SyncFromVariables(): void
+    {
+        $this->SetTimerInterval('VariableSync', 0);
+        if (!$this->SpotifyAvailable()) {
+            return;
+        }
+        $track = (string) $this->SpotifyValue('CurrentTrack', '-');
+        if ($track === '' || $track === '-') {
+            $this->SetBuffer('NowPlaying', '');
+            $this->Push(['type' => 'nowPlaying', 'item' => null]);
+            return;
+        }
+
+        $last = json_decode($this->GetBuffer('NowPlaying'), true);
+        $artist = (string) $this->SpotifyValue('CurrentArtist', '');
+        $trackChanged = !is_array($last) || $last['name'] !== $track || $last['sub'] !== $artist;
+        $item = array_merge(is_array($last) ? $last : ['device' => '', 'deviceType' => '', 'canVolume' => true], [
+            'name'     => $track,
+            'sub'      => $artist,
+            'playing'  => (int) $this->SpotifyValue('Action', 0) === self::ACTION_PLAY,
+            'volume'   => (int) $this->SpotifyValue('Volume', 0),
+            'progress' => $this->DurationToMs((string) $this->SpotifyValue('CurrentPosition', '0:00')),
+            'duration' => $this->DurationToMs((string) $this->SpotifyValue('CurrentDuration', '0:00'))
+        ]);
+        if ($trackChanged) {
+            // Cover, Kontext und Gerät des neuen Titels kommen gleich per API
+            $item['uri'] = '';
+            $item['image'] = '';
+            $item['contextUri'] = '';
+            $this->SetTimerInterval('ApiSync', 300);
+        }
+        $this->SetBuffer('NowPlaying', json_encode($item));
+        $this->Push(['type' => 'nowPlaying', 'item' => $item]);
+    }
+
+    /**
+     * Aktuelle Wiedergabe per API abrufen; nach eigenen Befehlen auch die Spotify-Instanz nachziehen.
+     */
+    public function SyncFromApi(): void
+    {
+        $this->SetTimerInterval('ApiSync', 0);
+        $this->PushNowPlaying();
+        if ($this->GetBuffer('UpdateSpotify') === '1') {
+            $this->SetBuffer('UpdateSpotify', '');
+            $error = '';
+            $this->CallSpotify(fn (int $id) => SPO_UpdateVariables($id), $error);
+        }
     }
 
     public function RequestAction(string $Ident, mixed $Value): void
@@ -459,13 +542,12 @@ class SpotifyKachel extends IPSModuleStrict
         $this->AfterPlaybackChange();
     }
 
-    private function AfterPlaybackChange(): void
+    private function AfterPlaybackChange(int $delay = 700): void
     {
-        // Spotify braucht einen Moment, bis der neue Zustand abrufbar ist
-        IPS_Sleep(600);
-        $this->PushNowPlaying();
-        $error = '';
-        $this->CallSpotify(fn (int $id) => SPO_UpdateVariables($id), $error);
+        // Spotify braucht einen Moment, bis der neue Zustand abrufbar ist – im Hintergrund nachladen,
+        // statt die Kachel warten zu lassen. Play/Pause meldet die Spotify-Instanz sofort über "Action".
+        $this->SetBuffer('UpdateSpotify', '1');
+        $this->SetTimerInterval('ApiSync', $delay);
     }
 
     private function PushNowPlaying(): void
@@ -474,8 +556,12 @@ class SpotifyKachel extends IPSModuleStrict
             return;
         }
         $player = $this->Api('GET', '/me/player?additional_types=episode');
+        if ($player === null) {
+            return; // API-Fehler: letzten Stand behalten
+        }
         $item = $player['item'] ?? null;
         if (!is_array($item)) {
+            $this->SetBuffer('NowPlaying', '');
             $this->Push(['type' => 'nowPlaying', 'item' => null]);
             return;
         }
@@ -486,24 +572,25 @@ class SpotifyKachel extends IPSModuleStrict
             $this->AddToHistory($contextUri);
         }
 
-        $this->Push([
-            'type' => 'nowPlaying',
-            'item' => [
-                'uri'        => (string) $item['uri'],
-                'name'       => (string) $item['name'],
-                'sub'        => $isEpisode
-                    ? (string) ($item['show']['name'] ?? '')
-                    : implode(', ', array_map(fn ($a) => $a['name'], $item['artists'] ?? [])),
-                'image'      => $this->PickImage($isEpisode ? ($item['images'] ?? []) : ($item['album']['images'] ?? [])),
-                'contextUri' => $contextUri,
-                'playing'    => (bool) ($player['is_playing'] ?? false),
-                'progress'   => (int) ($player['progress_ms'] ?? 0),
-                'duration'   => (int) ($item['duration_ms'] ?? 0),
-                'device'     => (string) ($player['device']['name'] ?? ''),
-                'volume'     => isset($player['device']['volume_percent']) ? (int) $player['device']['volume_percent'] : null,
-                'canVolume'  => (bool) ($player['device']['supports_volume'] ?? true)
-            ]
-        ]);
+        $nowPlaying = [
+            'uri'        => (string) $item['uri'],
+            'name'       => (string) $item['name'],
+            // Wie die Spotify-Instanz, damit der Abgleich über die Variablen keinen Titelwechsel vermutet
+            'sub'        => $isEpisode
+                ? (string) ($item['show']['publisher'] ?? '')
+                : implode(', ', array_map(fn ($a) => $a['name'], $item['artists'] ?? [])),
+            'image'      => $this->PickImage($isEpisode ? ($item['images'] ?? []) : ($item['album']['images'] ?? [])),
+            'contextUri' => $contextUri,
+            'playing'    => (bool) ($player['is_playing'] ?? false),
+            'progress'   => (int) ($player['progress_ms'] ?? 0),
+            'duration'   => (int) ($item['duration_ms'] ?? 0),
+            'device'     => (string) ($player['device']['name'] ?? ''),
+            'deviceType' => (string) ($player['device']['type'] ?? ''),
+            'volume'     => isset($player['device']['volume_percent']) ? (int) $player['device']['volume_percent'] : null,
+            'canVolume'  => (bool) ($player['device']['supports_volume'] ?? true)
+        ];
+        $this->SetBuffer('NowPlaying', json_encode($nowPlaying));
+        $this->Push(['type' => 'nowPlaying', 'item' => $nowPlaying]);
     }
 
     private function PushDevices(string $cid): void
@@ -547,8 +634,7 @@ class SpotifyKachel extends IPSModuleStrict
                 $this->Push(['type' => 'error', 'text' => 'Gerät konnte nicht gewechselt werden.']);
             }
         }
-        IPS_Sleep(800);
-        $this->PushNowPlaying();
+        $this->AfterPlaybackChange(800);
     }
 
     private function SetVolume(int $volume): void
@@ -613,6 +699,21 @@ class SpotifyKachel extends IPSModuleStrict
             $value = 'spotify:' . $m[1] . ':' . $m[2];
         }
         return preg_match(self::URI_PATTERN, $value) ? $value : null;
+    }
+
+    private function SpotifyValue(string $ident, mixed $default): mixed
+    {
+        $variableID = @IPS_GetObjectIDByIdent($ident, $this->ReadPropertyInteger('SpotifyInstance'));
+        return $variableID === false ? $default : GetValue($variableID);
+    }
+
+    private function DurationToMs(string $duration): int
+    {
+        $ms = 0;
+        foreach (explode(':', $duration) as $part) {
+            $ms = $ms * 60 + (int) $part;
+        }
+        return $ms * 1000;
     }
 
     private function UriType(string $uri): string
